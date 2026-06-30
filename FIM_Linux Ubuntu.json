@@ -1,0 +1,183 @@
+{
+  "name": "FIM(Linux Ubuntu)",
+  "nodes": [
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM registros_archivos WHERE notificado = false AND evento != 'BASELINE';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        208,
+        0
+      ],
+      "id": "51f367ec-e55c-4d44-9c2b-bd3914930eb2",
+      "name": "Execute a SQL query",
+      "credentials": {
+        "postgres": {
+          "id": "ErULW6yBaqqnODaA",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        0
+      ],
+      "id": "6a1c8178-61b4-43db-b0ed-ef7cf11bb456",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "chatId": "8350196445",
+        "text": "=Se detectó un cambio en el archivo: {{$json.nombre_archivo}} - Evento: {{$json.evento}}).",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        624,
+        0
+      ],
+      "id": "69914b33-5c25-479c-82c1-0442c05154da",
+      "name": "Send a text message",
+      "webhookId": "c574f8d2-ee7f-4af7-94e7-0d7710cbcfd9",
+      "credentials": {
+        "telegramApi": {
+          "id": "2DBAzRJnnMwy5i59",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "7e4f7901-d1fe-4211-874d-2927c9699a20",
+              "leftValue": "={{ $json.nombre_archivo }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        416,
+        0
+      ],
+      "id": "ac932540-ca7a-48fb-9a9d-e4d83bf02606",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE registros_archivos SET notificado = TRUE WHERE id = {{ $('Execute a SQL query').item.json.id }};",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        832,
+        0
+      ],
+      "id": "6da0969c-1baa-4364-ad11-98cbfbd6dc59",
+      "name": "Execute a SQL query1",
+      "credentials": {
+        "postgres": {
+          "id": "ErULW6yBaqqnODaA",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a text message": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "8ddb3104-a1a8-4daf-a102-48e8295dd490",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "ddaa6c98d2b4d6720a021a5b333af38016553bfc6f1cd81d0b3c384b6f43db69"
+  },
+  "id": "eZefeAD5XGt0Eixr",
+  "tags": []
+}
