@@ -6,15 +6,18 @@ import os
 import shutil
 import pwd # Sirve para traducir el ID de usuario al nombre (ej: root)
 import stat # Sirver para leer los permisos (ej: chmod 755)
+from dotenv import load_dotenv
 
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
 #--- CONFIGURACION ---
-DB_HOST = "localhost"
-DB_NAME = "fim_db"
-DB_USER = "fim_user"
-DB_PASS = "291020"
+load_dotenv()
+
+DB_HOST = os.getenv("DB_HOST")
+DB_NAME = os.getenv("DB_NAME")
+DB_USER = os.getenv("DB_USER")
+DB_PASS = os.getenv("DB_PASS")
 PATHS_TO_WATCH = ["/etc", "/root", "/usr/bin"]
 
 #--- MEMORIA RAM PARA EL DIFF ---
@@ -126,6 +129,8 @@ def generar_baseline():
         print(f"EXITO: Baseline completada. {contador_archivos} archivos seguros registrados en BD.", flush=True)
 
 def cuarentenar_archivo(filepath, nombre_archivo):
+    if not os.path.exists(filepath):
+        return None #El archivo ya fue cuarentenado por otro evento
     try:
         timestamp = time.strftime("%Y%m%d-%H%M%S")
         nombre_seguro = f"{nombre_archivo}_{timestamp}.infectado"
@@ -193,8 +198,10 @@ class FIMEventHandler(FileSystemEventHandler):
             nombre = event.dest_path.split('/')[-1]
             if event.src_path in memoria_archivos:
                 memoria_archivos[event.dest_path] = memoria_archivos.pop(event.src_path)
-            log_to_db(nombre, event.dest_path, h, 'MOVIDO',  "Movido desde: {event.src_path}", propietario, permisos)
+            log_to_db(nombre, event.dest_path, h_sha256, h_md5, 'MOVIDO', f"Movido desde: {event.src_path}", propietario, permisos)
             print(f"EXITO: MOVIDO guardado en BD -> {nombre}", flush=True)
+            if any(event.dest_path.startswith(p) for p in PATHS_TO_WATCH):
+                cuarentenar_archivo(event.dest_path, nombre)
         except Exception as e:
             print(f"ERROR PROCESANDO MOVIDO: {e}", flush=True)
 
