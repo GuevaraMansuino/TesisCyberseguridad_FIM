@@ -45,18 +45,19 @@
     {
       "parameters": {
         "chatId": "8350196445",
-        "text": "=Se detectó un cambio en el archivo: {{$json.nombre_archivo}} - Evento: {{$json.evento}}).",
+        "text": "=Se detectó un cambio en el archivo: {{$json.nombre_archivo}} - Evento: {{$json.evento}}.",
         "additionalFields": {}
       },
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
       "position": [
-        624,
+        832,
         0
       ],
       "id": "69914b33-5c25-479c-82c1-0442c05154da",
       "name": "Send a text message",
       "webhookId": "c574f8d2-ee7f-4af7-94e7-0d7710cbcfd9",
+      "retryOnFail": true,
       "credentials": {
         "telegramApi": {
           "id": "2DBAzRJnnMwy5i59",
@@ -101,13 +102,13 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "UPDATE registros_archivos SET notificado = TRUE WHERE id = {{ $('Execute a SQL query').item.json.id }};",
+        "query": "UPDATE registros_archivos SET notificado = TRUE WHERE id = {{ $('Loop Over Items').item.json.id }};",
         "options": {}
       },
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        832,
+        1040,
         0
       ],
       "id": "6da0969c-1baa-4364-ad11-98cbfbd6dc59",
@@ -118,6 +119,33 @@
           "name": "Postgres account"
         }
       }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        624,
+        0
+      ],
+      "id": "12d995eb-29d5-44e5-89f8-21e8b1420e9a",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "amount": 2
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1248,
+        0
+      ],
+      "id": "6c483e01-fc82-4ca8-9bfb-3631e848b7e4",
+      "name": "Wait",
+      "webhookId": "fbb5e533-709e-4cdf-b1fd-4a9f60c79244"
     }
   ],
   "pinData": {},
@@ -148,7 +176,7 @@
       "main": [
         [
           {
-            "node": "Send a text message",
+            "node": "Loop Over Items",
             "type": "main",
             "index": 0
           }
@@ -165,6 +193,40 @@
           }
         ]
       ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query1": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": true,
@@ -173,7 +235,7 @@
     "binaryMode": "separate",
     "availableInMCP": false
   },
-  "versionId": "8ddb3104-a1a8-4daf-a102-48e8295dd490",
+  "versionId": "2152c15a-5b08-4bc1-96e7-ac2afde4cb3a",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "ddaa6c98d2b4d6720a021a5b333af38016553bfc6f1cd81d0b3c384b6f43db69"
