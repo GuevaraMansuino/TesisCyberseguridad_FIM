@@ -283,7 +283,7 @@ class FIMEventHandler(FileSystemEventHandler):
                 memoria_archivos[event.dest_path] = memoria_archivos.pop(event.src_path)
             log_to_db(nombre, event.dest_path, h_sha256, h_md5, 'MOVIDO', f"Movido desde: {event.src_path}", propietario, permisos)
             print(f"EXITO: MOVIDO guardado en BD -> {nombre}", flush=True)
-            procesar_contencion(event.src_path, nombre)
+            procesar_contencion(event.dest_path, nombre)
         except Exception as e:
             print(f"ERROR PROCESANDO MOVIDO: {e}", flush=True)
 
