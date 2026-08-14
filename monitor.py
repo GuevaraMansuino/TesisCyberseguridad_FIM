@@ -6,6 +6,8 @@ import os
 import shutil
 import pwd # Sirve para traducir el ID de usuario al nombre (ej: root)
 import stat # Sirver para leer los permisos (ej: chmod 755)
+from collections import deque
+from threading import Lock
 from dotenv import load_dotenv
 
 from watchdog.observers import Observer
@@ -19,6 +21,29 @@ DB_NAME = os.getenv("DB_NAME")
 DB_USER = os.getenv("DB_USER")
 DB_PASS = os.getenv("DB_PASS")
 PATHS_TO_WATCH = ["/etc", "/root", "/usr/bin"]
+
+# Rutas excluidas de la cuarentena automática: forman parte del
+# funcionamiento normal del sistema operativo y del gestor de
+# paquetes, y NO deben retirarse aunque estén dentro de una zona
+# vigilada.
+RUTAS_EXCLUIDAS = {
+    "/etc/resolv.conf",
+    "/etc/mtab",
+    "/etc/ld.so.cache",
+    "/etc/apt/",
+    "/etc/dpkg/",
+    "/var/lib/dpkg/",
+    "/var/lib/apt/",
+}
+
+# Cortacircuitos por tasa: si se superan UMBRAL_CUARENTENAS eventos
+# de contención en VENTANA_SEGUNDOS, el sistema suspende la cuarentena
+# automática (pasa a modo "solo alerta") para no destruirse a sí
+# mismo ante una actualización legítima masiva (ej. apt upgrade).
+UMBRAL_CUARENTENAS = 10
+VENTANA_SEGUNDOS = 30
+_historial_cuarentenas = deque()
+_lock_circuito = Lock()
 
 #--- MEMORIA RAM PARA EL DIFF ---
 memoria_archivos = {}
@@ -128,6 +153,61 @@ def generar_baseline():
 
         print(f"EXITO: Baseline completada. {contador_archivos} archivos seguros registrados en BD.", flush=True)
 
+def es_ruta_vigilada(ruta):
+    """Determina si una ruta pertenece a una zona crítica vigilada,
+    comparando por componentes de path completos (evita falsos
+    positivos del tipo /etc vs /etcetera)."""
+    ruta_norm = os.path.abspath(ruta)
+    for base in PATHS_TO_WATCH:
+        base_norm = os.path.abspath(base)
+        if ruta_norm == base_norm or ruta_norm.startswith(base_norm + os.sep):
+            return True
+    return False
+
+def esta_excluido(ruta):
+    """Determina si una ruta está en la lista de exclusión estática."""
+    ruta_norm = os.path.abspath(ruta)
+    for prefijo in RUTAS_EXCLUIDAS:
+        prefijo_norm = prefijo.rstrip("/")
+        if ruta_norm == prefijo_norm or ruta_norm.startswith(prefijo_norm + os.sep):
+            return True
+    return False
+
+def circuito_disponible():
+    """Cortacircuitos por tasa. Registra el intento de cuarentena y
+    devuelve False (circuito abierto) si se superó el umbral de
+    eventos permitidos en la ventana configurada. Se autorrestablece
+    solo cuando la tasa de eventos baja."""
+    ahora = time.time()
+    with _lock_circuito:
+        _historial_cuarentenas.append(ahora)
+        while _historial_cuarentenas and ahora - _historial_cuarentenas[0] > VENTANA_SEGUNDOS:
+            _historial_cuarentenas.popleft()
+        return len(_historial_cuarentenas) <= UMBRAL_CUARENTENAS
+
+def procesar_contencion(filepath, nombre_archivo):
+    """Punto único de decisión sobre si un archivo debe ser
+    cuarentenado. Centraliza vigilancia de rutas, exclusión estática
+    y cortacircuitos por tasa para los tres manejadores de eventos."""
+    if not es_ruta_vigilada(filepath):
+        return None
+
+    if esta_excluido(filepath):
+        log_to_db(nombre_archivo, filepath, None, None, 'EXCLUIDO_POR_POLITICA',
+                   "Ruta excluida de la contención automática (RUTAS_EXCLUIDAS)",
+                   "desconocido", "desconocido")
+        print(f"  EXCLUIDO: {nombre_archivo} está en RUTAS_EXCLUIDAS, no se cuarentena.", flush=True)
+        return None
+
+    if not circuito_disponible():
+        log_to_db(nombre_archivo, filepath, None, None, 'CIRCUITO_ABIERTO',
+                   "Cortacircuitos por tasa activo: cuarentena automática suspendida temporalmente",
+                   "desconocido", "desconocido")
+        print(f"  CORTACIRCUITOS: {nombre_archivo} NO fue cuarentenado (modo solo alerta activo).", flush=True)
+        return None
+
+    return cuarentenar_archivo(filepath, nombre_archivo)
+
 def cuarentenar_archivo(filepath, nombre_archivo):
     if not os.path.exists(filepath):
         return None #El archivo ya fue cuarentenado por otro evento
@@ -155,9 +235,7 @@ class FIMEventHandler(FileSystemEventHandler):
             memoria_archivos[event.src_path] = leer_archivo_texto(event.src_path)
             log_to_db(nombre,event.src_path, h_sha256, h_md5,'CREADO', "", propietario, permisos)
 
-            # Revisamos si la ruta del evento empieza con alguna de nuestras carpetas vigiladas
-            if any(event.src_path.startswith(p) for p in PATHS_TO_WATCH):
-                cuarentenar_archivo(event.src_path, nombre)
+            procesar_contencion(event.src_path, nombre)
 
     def on_modified(self, event):
         if not event.is_directory:
@@ -179,9 +257,7 @@ class FIMEventHandler(FileSystemEventHandler):
             log_to_db(nombre, event.src_path, h_sha256, h_md5, 'MODIFICADO', texto_diff, propietario, permisos)
             print(f"EXITO: MODIFICADO con diff guardado -> {nombre}", flush=True)
 
-            # Revisamos si la ruta del evento empieza con alguna de nuestras carpetas vigiladas
-            if any(event.src_path.startswith(p) for p in PATHS_TO_WATCH):
-                cuarentenar_archivo(event.src_path, nombre)
+            procesar_contencion(event.src_path, nombre)
 
     def on_deleted(self,event):
         if not event.is_directory:
@@ -200,8 +276,7 @@ class FIMEventHandler(FileSystemEventHandler):
                 memoria_archivos[event.dest_path] = memoria_archivos.pop(event.src_path)
             log_to_db(nombre, event.dest_path, h_sha256, h_md5, 'MOVIDO', f"Movido desde: {event.src_path}", propietario, permisos)
             print(f"EXITO: MOVIDO guardado en BD -> {nombre}", flush=True)
-            if any(event.dest_path.startswith(p) for p in PATHS_TO_WATCH):
-                cuarentenar_archivo(event.dest_path, nombre)
+            procesar_contencion(event.src_path, nombre)
         except Exception as e:
             print(f"ERROR PROCESANDO MOVIDO: {e}", flush=True)
 
