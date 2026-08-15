@@ -95,6 +95,8 @@ CREATE TABLE registros_archivos (
                 'ELIMINADO',
                 'MOVIDO',
                 'BASELINE'
+                'EXCLUIDO_POR_POLITICA',
+                'CIRCUITO_ABIERTO'
             )
         ),
     fecha_registro TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
