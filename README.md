@@ -104,6 +104,10 @@ CREATE TABLE registros_archivos (
     detalles_diff TEXT
 );
 
+REVOKE ALL ON registros_archivos FROM PUBLIC; 
+GRANT SELECT, INSERT, UPDATE ON registros_archivos TO fim_user;
+GRANT USAGE, SELECT ON SEQUENCE registros_archivos_id_seq TO fim_user; 
+
 -- Índices para optimización de consultas en Grafana (fecha y tipo de evento)
 -- y en n8n (polling de eventos pendientes de notificación)
 CREATE INDEX idx_fecha_registro ON registros_archivos(fecha_registro);
