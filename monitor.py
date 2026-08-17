@@ -52,16 +52,20 @@ EXTENSIONES_BINARIAS = {'.so', '.bin', '.o', '.a', '.pyc', '.jpg', '.png', '.gz'
 LIMITE_BYTES_DIFF = 512 * 1024  # 512 KiB
 
 def leer_archivo_texto(ruta):
-   try:
-      ext = os.path.splitext(ruta)[1].lower()
-      if ext in EXTENSIONES_BINARIAS:
-         return []
-      if os.path.getsize(ruta) > LIMITE_BYTES_DIFF:
-         return []
-      with open(ruta, 'r', encoding='utf-8', errors='ignore') as f:
-          return f.readlines()
-   except Exception:
-      return []
+    try:
+        ext = os.path.splitext(ruta)[1].lower()
+        if ext in EXTENSIONES_BINARIAS:
+            return []
+        if os.path.getsize(ruta) > LIMITE_BYTES_DIFF:
+            return []
+        # NUEVO: Comprobación de byte nulo para detectar binarios sin extensión
+        with open(ruta, 'rb') as f:
+            if b'\x00' in f.read(1024):
+                return []
+        with open(ruta, 'r', encoding='utf-8', errors='ignore') as f:
+            return f.readlines()
+    except Exception:
+        return []
 
 #--- FUNCIONES AUXILIARES ---
 def get_hashes(filepath):
