@@ -6,7 +6,7 @@ import os
 import shutil
 import pwd # Sirve para traducir el ID de usuario al nombre (ej: root)
 import stat # Sirver para leer los permisos (ej: chmod 755)
-from collections import deque
+from collections import deque, defaultdict
 from threading import Lock
 from dotenv import load_dotenv
 
@@ -44,6 +44,24 @@ UMBRAL_CUARENTENAS = 10
 VENTANA_SEGUNDOS = 30
 _historial_cuarentenas = deque()
 _lock_circuito = Lock()
+
+#--- LOCKS POR ARCHIVO: evitan la condición de carrera entre la lectura ---
+#--- del contenido para el diff y una posible cuarentena concurrente sobre  ---
+#--- la misma ruta (ver §5.9 / Tabla 5.4 del documento) ---
+_locks_por_archivo = defaultdict(Lock)
+_lock_registro_locks = Lock()  # protege la creación de locks nuevos
+
+
+def obtener_lock(ruta):
+    """
+    Devuelve el lock asociado a una ruta específica, creándolo si no existe.
+    Usar siempre este getter en vez de acceder a _locks_por_archivo
+    directamente, para evitar una condición de carrera en la creación
+    del lock mismo.
+    """
+    with _lock_registro_locks:
+        return _locks_por_archivo[ruta]
+
 
 #--- MEMORIA RAM PARA EL DIFF ---
 memoria_archivos = {}
@@ -240,35 +258,41 @@ def cuarentenar_archivo(filepath, nombre_archivo):
 class FIMEventHandler(FileSystemEventHandler):
     def on_created(self,event):
         if not event.is_directory:
-            h_sha256, h_md5 = get_hashes(event.src_path)
-            propietario, permisos = obtener_metadatos(event.src_path)
-            nombre = event.src_path.split('/')[-1]
-            memoria_archivos[event.src_path] = leer_archivo_texto(event.src_path)
-            log_to_db(nombre,event.src_path, h_sha256, h_md5,'CREADO', "", propietario, permisos)
+            with obtener_lock(event.src_path):
+                h_sha256, h_md5 = get_hashes(event.src_path)
+                propietario, permisos = obtener_metadatos(event.src_path)
+                nombre = event.src_path.split('/')[-1]
+                memoria_archivos[event.src_path] = leer_archivo_texto(event.src_path)
+                log_to_db(nombre,event.src_path, h_sha256, h_md5,'CREADO', "", propietario, permisos)
 
-            procesar_contencion(event.src_path, nombre)
+                procesar_contencion(event.src_path, nombre)
 
     def on_modified(self, event):
         if not event.is_directory:
-            h_sha256, h_md5 = get_hashes(event.src_path)
-            propietario, permisos = obtener_metadatos(event.src_path)
-            nombre = event.src_path.split('/')[-1]
+            # Todo el bloque queda protegido por el lock de esta ruta puntual:
+            # mientras se lee el contenido para el diff, ningún otro evento
+            # sobre el mismo archivo (incluida una posible cuarentena) puede
+            # avanzar. Corrige la condición de carrera documentada en §5.9.
+            with obtener_lock(event.src_path):
+                h_sha256, h_md5 = get_hashes(event.src_path)
+                propietario, permisos = obtener_metadatos(event.src_path)
+                nombre = event.src_path.split('/')[-1]
 
-            lineas_nuevas = leer_archivo_texto(event.src_path)
-            lineas_viejas = memoria_archivos.get(event.src_path, [])
+                lineas_nuevas = leer_archivo_texto(event.src_path)
+                lineas_viejas = memoria_archivos.get(event.src_path, [])
 
-            texto_diff = ""
-            if lineas_viejas:
-                diff_gen = difflib.unified_diff(lineas_viejas, lineas_nuevas, fromfile='Antes', tofile='Ahora')
-                texto_diff = ''.join(list(diff_gen))
-            else:
-                texto_diff = "Contenido modificado. (Sin Registro previo en memoria para comparar)"
+                texto_diff = ""
+                if lineas_viejas:
+                    diff_gen = difflib.unified_diff(lineas_viejas, lineas_nuevas, fromfile='Antes', tofile='Ahora')
+                    texto_diff = ''.join(list(diff_gen))
+                else:
+                    texto_diff = "Contenido modificado. (Sin Registro previo en memoria para comparar)"
 
-            memoria_archivos[event.src_path] = lineas_nuevas
-            log_to_db(nombre, event.src_path, h_sha256, h_md5, 'MODIFICADO', texto_diff, propietario, permisos)
-            print(f"EXITO: MODIFICADO con diff guardado -> {nombre}", flush=True)
+                memoria_archivos[event.src_path] = lineas_nuevas
+                log_to_db(nombre, event.src_path, h_sha256, h_md5, 'MODIFICADO', texto_diff, propietario, permisos)
+                print(f"EXITO: MODIFICADO con diff guardado -> {nombre}", flush=True)
 
-            procesar_contencion(event.src_path, nombre)
+                procesar_contencion(event.src_path, nombre)
 
     def on_deleted(self,event):
         if not event.is_directory:
@@ -280,14 +304,15 @@ class FIMEventHandler(FileSystemEventHandler):
     def on_moved(self, event):
         print(f"INTENTO DE MOVIDO: Origen = {event.src_path} Destino = {event.dest_path}", flush = True)
         try:
-            h_sha256, h_md5 = get_hashes(event.dest_path)
-            propietario, permisos = obtener_metadatos(event.dest_path)
-            nombre = event.dest_path.split('/')[-1]
-            if event.src_path in memoria_archivos:
-                memoria_archivos[event.dest_path] = memoria_archivos.pop(event.src_path)
-            log_to_db(nombre, event.dest_path, h_sha256, h_md5, 'MOVIDO', f"Movido desde: {event.src_path}", propietario, permisos)
-            print(f"EXITO: MOVIDO guardado en BD -> {nombre}", flush=True)
-            procesar_contencion(event.dest_path, nombre)
+            with obtener_lock(event.dest_path):
+                h_sha256, h_md5 = get_hashes(event.dest_path)
+                propietario, permisos = obtener_metadatos(event.dest_path)
+                nombre = event.dest_path.split('/')[-1]
+                if event.src_path in memoria_archivos:
+                    memoria_archivos[event.dest_path] = memoria_archivos.pop(event.src_path)
+                log_to_db(nombre, event.dest_path, h_sha256, h_md5, 'MOVIDO', f"Movido desde: {event.src_path}", propietario, permisos)
+                print(f"EXITO: MOVIDO guardado en BD -> {nombre}", flush=True)
+                procesar_contencion(event.dest_path, nombre)
         except Exception as e:
             print(f"ERROR PROCESANDO MOVIDO: {e}", flush=True)
 
