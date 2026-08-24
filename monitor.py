@@ -257,7 +257,7 @@ def cuarentenar_archivo(filepath, nombre_archivo):
 #--- MANEJADOR DE EVENTOS ---
 class FIMEventHandler(FileSystemEventHandler):
     def on_created(self,event):
-        if not event.is_directory:
+        if not event.is_directory and not os.path.islink(event.src_path):
             with obtener_lock(event.src_path):
                 h_sha256, h_md5 = get_hashes(event.src_path)
                 propietario, permisos = obtener_metadatos(event.src_path)
@@ -268,7 +268,7 @@ class FIMEventHandler(FileSystemEventHandler):
                 procesar_contencion(event.src_path, nombre)
 
     def on_modified(self, event):
-        if not event.is_directory:
+        if not event.is_directory and not os.path.islink(event.src_path):
             # Todo el bloque queda protegido por el lock de esta ruta puntual:
             # mientras se lee el contenido para el diff, ningún otro evento
             # sobre el mismo archivo (incluida una posible cuarentena) puede
@@ -303,6 +303,8 @@ class FIMEventHandler(FileSystemEventHandler):
 
     def on_moved(self, event):
         print(f"INTENTO DE MOVIDO: Origen = {event.src_path} Destino = {event.dest_path}", flush = True)
+        if event.is_directory or os.path.islink(event.dest_path):
+            return
         try:
             with obtener_lock(event.dest_path):
                 h_sha256, h_md5 = get_hashes(event.dest_path)
