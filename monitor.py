@@ -7,7 +7,7 @@ import shutil
 import pwd # Sirve para traducir el ID de usuario al nombre (ej: root)
 import stat # Sirver para leer los permisos (ej: chmod 755)
 from collections import deque, defaultdict
-from threading import Lock
+from threading import Lock, Timer
 from dotenv import load_dotenv
 
 from watchdog.observers import Observer
@@ -40,7 +40,7 @@ RUTAS_EXCLUIDAS = {
 # de contención en VENTANA_SEGUNDOS, el sistema suspende la cuarentena
 # automática (pasa a modo "solo alerta") para no destruirse a sí
 # mismo ante una actualización legítima masiva (ej. apt upgrade).
-UMBRAL_CUARENTENAS = 10
+UMBRAL_CUARENTENAS = 200
 VENTANA_SEGUNDOS = 30
 _historial_cuarentenas = deque()
 _lock_circuito = Lock()
@@ -63,8 +63,56 @@ def obtener_lock(ruta):
         return _locks_por_archivo[ruta]
 
 
+#--- CONTENCIÓN DIFERIDA (DEBOUNCE): evita que la cuarentena de un ---
+#--- evento CREATED elimine la ventana de lectura de un evento MODIFIED ---
+#--- casi simultáneo sobre la misma ruta, preservando el diff forense ---
+DEBOUNCE_SEGUNDOS = 0.15  # margen de gracia antes de cuarentenar de forma efectiva
+_temporizadores_contencion = {}
+_lock_temporizadores = Lock()
+
+
+def programar_contencion(filepath, nombre_archivo):
+    """
+    En lugar de cuarentenar inmediatamente, programa la contención con un
+    breve período de gracia (DEBOUNCE_SEGUNDOS). Si llega un nuevo evento
+    sobre la misma ruta durante esa ventana —por ejemplo, el MODIFIED que
+    sigue a un CREATED disparado por el mismo `tee`— se cancela el
+    temporizador anterior y se reprograma, permitiendo que ese evento
+    también calcule su diff forense antes de que el archivo sea retirado.
+    La cuarentena efectiva ocurre recién cuando la ráfaga de eventos sobre
+    esa ruta se aquieta.
+    """
+    with _lock_temporizadores:
+        temporizador_previo = _temporizadores_contencion.get(filepath)
+        if temporizador_previo is not None:
+            temporizador_previo.cancel()
+        nuevo_temporizador = Timer(
+            DEBOUNCE_SEGUNDOS,
+            _ejecutar_contencion_diferida,
+            args=(filepath, nombre_archivo)
+        )
+        _temporizadores_contencion[filepath] = nuevo_temporizador
+        nuevo_temporizador.start()
+
+
+def _ejecutar_contencion_diferida(filepath, nombre_archivo):
+    with _lock_temporizadores:
+        _temporizadores_contencion.pop(filepath, None)
+    procesar_contencion(filepath, nombre_archivo)
+
 #--- MEMORIA RAM PARA EL DIFF ---
 memoria_archivos = {}
+
+# --- EXCLUSIÓN DECLARADA: patrones write-temp-and-rename de software legítimo del SO ---
+# dpkg (gestión de paquetes) y less (historial de comandos) escriben a un archivo
+# temporal y lo renombran atómicamente sobre el destino final. El ciclo completo
+# (crear temporal -> escribir -> renombrar/borrar) ocurre en milisegundos, antes de
+# que el monitor pueda leer el archivo para calcular su hash. Se documenta como
+# alcance excluido en el Capítulo 5, no como manejo de excepción silencioso.
+PATRONES_EXCLUIDOS = ('.dpkg-new', '.dpkg-tmp', '.lesshst', '.lesshsQ')
+
+def es_ruta_excluida(filepath):
+    return filepath.endswith(PATRONES_EXCLUIDOS)
 
 EXTENSIONES_BINARIAS = {'.so', '.bin', '.o', '.a', '.pyc', '.jpg', '.png', '.gz', '.zip'}
 LIMITE_BYTES_DIFF = 512 * 1024  # 512 KiB
@@ -256,16 +304,24 @@ def cuarentenar_archivo(filepath, nombre_archivo):
 
 #--- MANEJADOR DE EVENTOS ---
 class FIMEventHandler(FileSystemEventHandler):
+
     def on_created(self,event):
         if not event.is_directory:
+            nombre = event.src_path.split('/')[-1]
+            if es_ruta_excluida(event.src_path):
+                return
             with obtener_lock(event.src_path):
                 h_sha256, h_md5 = get_hashes(event.src_path)
                 propietario, permisos = obtener_metadatos(event.src_path)
-                nombre = event.src_path.split('/')[-1]
+                if h_sha256 is None:
+                    print(f"AVISO: {event.src_path} desapareció antes de poder calcular su hash (CREATE descartado)", flush=True)
+                    return
                 memoria_archivos[event.src_path] = leer_archivo_texto(event.src_path)
                 log_to_db(nombre,event.src_path, h_sha256, h_md5,'CREADO', "", propietario, permisos)
 
-                procesar_contencion(event.src_path, nombre)
+            # Contención diferida: fuera del lock de lectura, para no
+            # bloquear otros eventos mientras espera el margen de gracia.
+            programar_contencion(event.src_path, nombre)
 
     def on_modified(self, event):
         if not event.is_directory:
@@ -277,25 +333,35 @@ class FIMEventHandler(FileSystemEventHandler):
                 h_sha256, h_md5 = get_hashes(event.src_path)
                 propietario, permisos = obtener_metadatos(event.src_path)
                 nombre = event.src_path.split('/')[-1]
+                if h_sha256 is None:
+                    print(f"AVISO: {event.src_path} desapareció antes de poder calcular su hash (MODIFIED descartado)", flush=True)
+                    return
 
                 lineas_nuevas = leer_archivo_texto(event.src_path)
                 lineas_viejas = memoria_archivos.get(event.src_path, [])
 
                 texto_diff = ""
-                if lineas_viejas:
+                if not lineas_viejas and event.src_path not in memoria_archivos:
+                    texto_diff = "Contenido modificado. (Sin Registro previo en memoria para comparar)"
+                elif not lineas_viejas:
+                    texto_diff = "Contenido modificado. (Registro previo estaba vacío)"
+                else:
                     diff_gen = difflib.unified_diff(lineas_viejas, lineas_nuevas, fromfile='Antes', tofile='Ahora')
                     texto_diff = ''.join(list(diff_gen))
-                else:
-                    texto_diff = "Contenido modificado. (Sin Registro previo en memoria para comparar)"
+                    if not texto_diff:
+                        texto_diff = "Evento MODIFICADO redundante: contenido idéntico al último registrado (sin cambios reales)."
 
                 memoria_archivos[event.src_path] = lineas_nuevas
                 log_to_db(nombre, event.src_path, h_sha256, h_md5, 'MODIFICADO', texto_diff, propietario, permisos)
                 print(f"EXITO: MODIFICADO con diff guardado -> {nombre}", flush=True)
 
-                procesar_contencion(event.src_path, nombre)
+            # Contención diferida: fuera del lock de lectura
+            programar_contencion(event.src_path, nombre)
 
     def on_deleted(self,event):
         if not event.is_directory:
+            if es_ruta_excluida(event.src_path):
+                return
             nombre = event.src_path.split('/')[-1]
             if event.src_path in memoria_archivos:
                 del memoria_archivos[event.src_path]
