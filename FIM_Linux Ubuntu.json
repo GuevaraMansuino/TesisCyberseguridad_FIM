@@ -15,6 +15,7 @@
       ],
       "id": "51f367ec-e55c-4d44-9c2b-bd3914930eb2",
       "name": "Execute a SQL query",
+      "alwaysOutputData": true,
       "credentials": {
         "postgres": {
           "id": "ErULW6yBaqqnODaA",
@@ -45,7 +46,7 @@
     {
       "parameters": {
         "chatId": "8350196445",
-        "text": "=Se detectó un cambio en el archivo: {{$json.nombre_archivo}} - Evento: {{$json.evento}}.",
+        "text": "=Se detectó un cambio en el archivo: {{$json.nombre_archivo}}\n- Evento: {{$json.evento}}.\n- Diff: {{$json.detalles_diff}}.",
         "additionalFields": {}
       },
       "type": "n8n-nodes-base.telegram",
@@ -235,7 +236,7 @@
     "binaryMode": "separate",
     "availableInMCP": false
   },
-  "versionId": "2152c15a-5b08-4bc1-96e7-ac2afde4cb3a",
+  "versionId": "11197bb6-3b5d-4024-be6b-dd9395319a2d",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "ddaa6c98d2b4d6720a021a5b333af38016553bfc6f1cd81d0b3c384b6f43db69"
