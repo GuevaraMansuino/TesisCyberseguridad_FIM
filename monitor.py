@@ -1,3 +1,4 @@
+
 import time
 import hashlib
 import psycopg2
@@ -295,6 +296,8 @@ def cuarentenar_archivo(filepath, nombre_archivo):
 
         # Movemos el archivo a la ruata de cuarentena
         shutil.move(filepath, ruta_cuarentena)
+        with open('/tmp/timestamps_mttm_fin.csv', 'a') as f_mttm:
+            f_mttm.write(f"{nombre_archivo},{time.time_ns()}\n")
         print(f"  IPS ACTIVO: {nombre_archivo} movido a {ruta_cuarentena}", flush=True)
         return ruta_cuarentena
     except Exception as e:
