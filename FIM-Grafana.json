@@ -656,20 +656,20 @@
       "type": "table"
     }
   ],
-  "refresh": "",
+  "refresh": "auto",
   "schemaVersion": 39,
   "tags": [],
   "templating": {
     "list": []
   },
   "time": {
-    "from": "now-90d",
+    "from": "now-30d",
     "to": "now"
   },
   "timepicker": {},
   "timezone": "America/Argentina/Buenos_Aires",
   "title": "Tabla",
   "uid": "cffic8ufed0xsa",
-  "version": 19,
+  "version": 20,
   "weekStart": "monday"
 }
