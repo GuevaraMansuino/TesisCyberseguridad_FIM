@@ -461,4 +461,4 @@ El archivo `FIM(Linux Ubuntu).json` contiene la definición completa del flujo d
 ---
 
 **Última actualización:** Septiembre 2026  
-**Versión:** 2.2.2 (Workflow n8n actualizado con Loop Over Items secuencial y Wait de control de ritmo)
+**Versión:** 2.0 (Workflow n8n actualizado con Loop Over Items secuencial y Wait de control de ritmo)
