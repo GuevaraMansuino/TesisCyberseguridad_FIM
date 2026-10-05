@@ -454,11 +454,11 @@ El archivo `FIM(Linux Ubuntu).json` contiene la definición completa del flujo d
 ## 📞 Contacto y Soporte
 
 - **Gerónimo Guevara Mansuino:** gguevaraman@gmail.com
-- **Francisco Lorenzo:** [contacto a definir]
+- **Francisco Lorenzo:** franciscopacolorenzo@gmail.com
 - **Repositorio:** https://github.com/GuevaraMansuino/TesisCyberseguridad_FIM
-- **Documentación de Tesis:** [URL de repositorio de documentos, si existe]
+- **Documentación de Tesis:** https://drive.google.com/file/d/1O6AUNSnATEwKyR5jc1LC0Bdwof_q3lF2/view
 
 ---
 
 **Última actualización:** Septiembre 2026  
-**Versión:** 2.0 (Workflow n8n actualizado con Loop Over Items secuencial y Wait de control de ritmo)
+**Versión:** 2.2.2 (Workflow n8n actualizado con Loop Over Items secuencial y Wait de control de ritmo)
